@@ -23,6 +23,7 @@
 
 const unsigned int JanusWrapper::JANUS_RED_SIZE = 1024;
 const unsigned int JanusWrapper::MAX_SIZE_TO_READ = 1250000; // computed esperimentally for 32 byte payload
+const unsigned int JanusWrapper::CRC_SIZE = 2; 
 
 JanusWrapper::JanusWrapper()
 :

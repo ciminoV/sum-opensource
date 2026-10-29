@@ -190,6 +190,7 @@ private:
 
   static const unsigned int JANUS_RED_SIZE; /**< constant equal to JANUS DEFAULT_DRV_IN_SIZE */
   static const unsigned int MAX_SIZE_TO_READ; /**< max size to read from buffer */
+  static const unsigned int CRC_SIZE; 
 
   int mac_mode; /**< MAC mode, 0 is disabled, 1 enabled */
 
