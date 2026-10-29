@@ -38,7 +38,8 @@ JanusWrapper::JanusWrapper()
   mutex_demod(),
   cv_demod(),
   demod_data_available(0),
-  mac_mode(0)
+  mac_mode(0),
+  app_type(0)
 {
   params = janus_parameters_new();
   initDefaultParams();
@@ -112,9 +113,20 @@ JanusWrapper::initPacket(janus_packet_t packet)
   janus_packet_set_tx_rx(packet, 1);
   janus_packet_set_forward(packet, 0);
   janus_packet_set_class_id(packet, 16);
-  janus_packet_set_app_type(packet, 0);
+  janus_packet_set_app_type(packet, app_type);
   janus_packet_set_validity(packet, 1); 
 }
+
+bool
+JanusWrapper::setJanusApplicationType(unsigned int type)
+{
+    if (type != 0 && type != 1)
+        return false;
+
+    app_type = static_cast<janus_uint8_t>(type);
+    return true;
+}
+
 bool
 JanusWrapper::setCarrierFrequency(float carr_freq)
 {
@@ -187,51 +199,74 @@ void JanusWrapper::pushRxChunk(std::shared_ptr<Chunk> rx_chunk)
   rx_buffer->push(rx_chunk);
 }
 
-bool 
+bool
 JanusWrapper::modulate(std::shared_ptr<Chunk> chunk)
 {
-  if(chunk->getSize() == 0) {
-    return false;
-  } 
-  janus_packet_t packet = janus_packet_new(params->verbose);
-  initPacket(packet);
-  char data[chunk->getHeaderSize() + chunk->getSize()] = {0};
-  memcpy(data,chunk->getHeader(), chunk->getHeaderSize());
-  memcpy(data + chunk->getHeaderSize(),chunk->data(), chunk->getSize());
+    if (chunk->getSize() == 0) {
+        return false;
+    }
 
-  int cargo_error = janus_packet_set_cargo(
-    packet, (janus_uint8_t*)data, chunk->getHeaderSize() + chunk->getSize());
-  if (cargo_error == JANUS_ERROR_CARGO_SIZE)
-  {
-    janus_packet_free(packet);
-    return false;
-  }
-  janus_packet_encode_application_data(packet);
-  janus_packet_set_validity(packet, 2);
-  if(janus_simple_tx_execute(simple_tx, packet, state_tx) < 0) {
-    janus_packet_free(packet);
-    return false;
-  }
-  
-  janus_tx_state_dump(state_tx);
-  janus_packet_dump(packet);
+    janus_packet_t packet = janus_packet_new(params->verbose);
+    initPacket(packet);
 
-  janus_ostream_t ostream = janus_simple_tx_get_ostream(simple_tx);
-  std::shared_ptr<Samples> samples = std::make_shared<Samples>(
-    JanusWrapper::MAX_SIZE_TO_READ);
-  int red_size = ostream->read(ostream,samples->samples.data(),
-    JanusWrapper::MAX_SIZE_TO_READ);
-  if(red_size < 0) {
-    janus_packet_free(packet);
-    return false;
-  }
-  samples->samples.resize(red_size);
-  samples->sample_size = red_size;//actual_size;
-  chunk->setModulatedSamples(samples);
-  janus_packet_free(packet);
-  return true;
+    const size_t header_size = chunk->getHeaderSize();
+    const size_t payload_size = chunk->getSize();
 
+    std::vector<janus_uint8_t> data(header_size + payload_size);
+
+    if (header_size > 0)
+        memcpy(data.data(), chunk->getHeader(), header_size);
+    memcpy(data.data() + header_size, chunk->data(), payload_size);
+
+	// Copy payload into packet cargo
+    int cargo_error = janus_packet_set_cargo(
+        packet, data.data(), static_cast<unsigned>(data.size()));
+
+    // Application Type 1: plugin appends CRC-16
+    if (cargo_error == JANUS_ERROR_NONE && app_type == 1)
+        cargo_error = janus_packet_encode_cargo_raw(packet);
+
+    if (cargo_error != JANUS_ERROR_NONE ||
+        janus_packet_encode_application_data(packet) != JANUS_ERROR_NONE) {
+        janus_packet_free(packet);
+        return false;
+    }
+
+    janus_packet_set_validity(packet, 2);
+
+    if (janus_simple_tx_execute(simple_tx, packet, state_tx) < 0) {
+        janus_packet_free(packet);
+        return false;
+    }
+
+    janus_tx_state_dump(state_tx);
+    janus_packet_dump(packet);
+
+    janus_ostream_t ostream = janus_simple_tx_get_ostream(simple_tx);
+
+    std::shared_ptr<Samples> samples =
+        std::make_shared<Samples>(JanusWrapper::MAX_SIZE_TO_READ);
+
+    int red_size = ostream->read(
+        ostream,
+        samples->samples.data(),
+        JanusWrapper::MAX_SIZE_TO_READ
+    );
+
+    if (red_size < 0) {
+        janus_packet_free(packet);
+        return false;
+    }
+
+    samples->samples.resize(red_size);
+    samples->sample_size = red_size;
+
+    chunk->setModulatedSamples(samples);
+
+    janus_packet_free(packet);
+    return true;
 }
+
 bool 
 JanusWrapper::demodulate(std::shared_ptr<Samples> samples)
 {
@@ -246,89 +281,117 @@ JanusWrapper::demodulate(std::shared_ptr<Samples> samples)
   return true;
 }
 
-void JanusWrapper::performDemodulation()
+void
+JanusWrapper::performDemodulation()
 {
-  unsigned queried_detection_time = 0;
-  janus_packet_t packet_rx = janus_packet_new(params->verbose);
-  janus_real_t time;
-  initPacket(packet_rx);
+    unsigned queried_detection_time = 0;
+    janus_packet_t packet_rx = janus_packet_new(params->verbose);
+    janus_real_t time;
 
-  while(active.load()) {
-    std::unique_lock<std::mutex> lck{mutex_demod};
-    cv_demod.wait(lck,[&](){
-      return demod_data_available >= JanusWrapper::JANUS_RED_SIZE || !(active.load());
-    }); 
-    int rv = janus_simple_rx_execute(simple_rx, packet_rx, state_rx);
-    
-    if (rv < 0) // error in reading
-    {
-      lck.unlock();
-      if (rv == JANUS_ERROR_OVERRUN)
-      {
-        // error happens
-      }
-    }
-    else if (rv > 0)
-    {
-      demod_data_available -= JanusWrapper::JANUS_RED_SIZE;
-      if(demod_data_available < 0) {
-        demod_data_available = 0;
-      }
-      lck.unlock();
+    initPacket(packet_rx);
 
-      if (janus_packet_get_validity(packet_rx) &&
-            janus_packet_get_cargo_error(packet_rx) == 0)
-      {
-        unsigned int _payload_len = janus_packet_get_cargo_size(packet_rx);
-	std::shared_ptr<Chunk> rx_chunk = std::make_shared<Chunk>(_payload_len);
-        if(rx_chunk->getSize() <= _payload_len) {
-          if(mac_mode){
-            // Ensure payload has at least 1 byte of application data (excluding MAC header).
-            // If needed, this can be relaxed to >= without issues, except for minor processing inefficiency.
-            if(_payload_len>sizeof(MacHdr)){
-                char hdr[Chunk::MAX_HEADER_SIZE] = {0};
-                memcpy(hdr, reinterpret_cast<char *>(
-                  janus_packet_get_cargo(packet_rx)), sizeof(MacHdr));
-                memcpy(rx_chunk->data(), reinterpret_cast<char *>(
-                  janus_packet_get_cargo(packet_rx)) + sizeof(MacHdr), 
-                _payload_len - sizeof(MacHdr));
-                rx_chunk->setSize(_payload_len - sizeof(MacHdr));
-                rx_chunk->addHeader(hdr,sizeof(MacHdr));
-                pushRxChunk(rx_chunk);
+    while (active.load()) {
+        std::unique_lock<std::mutex> lck{mutex_demod};
+
+        cv_demod.wait(lck, [&]() {
+            return demod_data_available >= JanusWrapper::JANUS_RED_SIZE ||
+                   !active.load();
+        });
+
+        if (!active.load())
+            break;
+
+        int rv = janus_simple_rx_execute(simple_rx, packet_rx, state_rx);
+
+        if (rv < 0) {
+            lck.unlock();
+
+            if (rv == JANUS_ERROR_OVERRUN) {
+                // Handle stream overrun.
             }
-          }else {
-            memcpy(rx_chunk->data(), reinterpret_cast<char *>(
-              janus_packet_get_cargo(packet_rx)),_payload_len);
-            rx_chunk->setSize(_payload_len);
-            pushRxChunk(rx_chunk);
-          }
+
+        } else if (rv > 0) {
+            demod_data_available -= JanusWrapper::JANUS_RED_SIZE;
+
+            if (demod_data_available < 0)
+                demod_data_available = 0;
+
+            lck.unlock();
+
+            if (janus_packet_get_validity(packet_rx) == 2 &&
+                janus_packet_get_cargo_error(packet_rx) == JANUS_ERROR_NONE &&
+                janus_packet_get_class_id(packet_rx) == 16 &&
+                janus_packet_get_app_type(packet_rx) == app_type) {
+
+                unsigned int data_size =
+                    janus_packet_get_cargo_size(packet_rx);
+
+                const janus_uint8_t* cargo =
+                    janus_packet_get_cargo(packet_rx);
+
+                // Application Type 1: CRC already verified by the plugin.
+                // Exclude the final two CRC bytes.
+                if (app_type == 1 && data_size >= CRC_SIZE)
+                    data_size -= CRC_SIZE;
+                else if (app_type == 1)
+                    data_size = 0;
+
+                if (cargo && data_size > 0) {
+                    std::shared_ptr<Chunk> rx_chunk =
+                        std::make_shared<Chunk>(data_size);
+
+                    if (mac_mode) {
+                        if (data_size > sizeof(MacHdr) &&
+                            sizeof(MacHdr) <= Chunk::MAX_HEADER_SIZE) {
+
+                            char hdr[Chunk::MAX_HEADER_SIZE] = {0};
+
+                            memcpy(hdr, cargo, sizeof(MacHdr));
+
+                            memcpy(
+                                rx_chunk->data(),
+                                cargo + sizeof(MacHdr),
+                                data_size - sizeof(MacHdr)
+                            );
+
+                            rx_chunk->setSize(data_size - sizeof(MacHdr));
+                            rx_chunk->addHeader(hdr, sizeof(MacHdr));
+
+                            pushRxChunk(rx_chunk);
+                        }
+                    } else {
+                        memcpy(rx_chunk->data(), cargo, data_size);
+
+                        rx_chunk->setSize(data_size);
+
+                        pushRxChunk(rx_chunk);
+                    }
+                }
+            }
+
+            janus_packet_reset(packet_rx);
+            queried_detection_time = 0;
+            janus_carrier_sensing_reset(carrier_sensing);
+
+        } else {
+            demod_data_available -= JanusWrapper::JANUS_RED_SIZE;
+
+            if (demod_data_available < 0)
+                demod_data_available = 0;
+
+            lck.unlock();
+
+            if (janus_simple_rx_has_detected(simple_rx) &&
+                !queried_detection_time) {
+                queried_detection_time = 1;
+            }
+
+            if (janus_carrier_sensing_execute(carrier_sensing, &time) > 0) {
+                janus_carrier_sensing_window_power(carrier_sensing);
+                janus_carrier_sensing_background_power(carrier_sensing);
+            }
         }
-      } else if (janus_packet_get_cargo_error(packet_rx) != 0) {
-        // ERROR janus_packet_get_cargo_error
-      } else if (!janus_packet_get_validity(packet_rx)) {
-        //Janus RX:: ERROR janus_packet_get_validity
-      }
-      janus_packet_reset(packet_rx);
-      queried_detection_time = 0;
-      janus_carrier_sensing_reset(carrier_sensing);
     }
-    else
-    {     
-      demod_data_available -= JanusWrapper::JANUS_RED_SIZE;  
-      if(demod_data_available < 0) {        
-        demod_data_available = 0;
-      }
-      lck.unlock();
-      if(janus_simple_rx_has_detected(simple_rx) 
-        && !queried_detection_time)
-      {
-        queried_detection_time = 1;
-      }
-      if (janus_carrier_sensing_execute(carrier_sensing, &time) > 0) {
-        janus_carrier_sensing_window_power(carrier_sensing);
-        janus_carrier_sensing_background_power(carrier_sensing);
-      }
-    }
-  }
-  janus_packet_free(packet_rx);
+
+    janus_packet_free(packet_rx);
 }

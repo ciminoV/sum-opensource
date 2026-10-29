@@ -251,6 +251,7 @@ int main(int argc, char* argv[])
   /**
    * Configure JANUS
    */
+  janus.setJanusApplicationType(0);
   janus.setSamplingFrequency(sampling_frequency);
   janus.setCarrierFrequency(center_frequency);
   janus.setBandwidth(bandwidth);
