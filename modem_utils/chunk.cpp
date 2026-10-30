@@ -17,8 +17,9 @@
 
 #include <chunk.h>
 #include <string.h>
-const size_t Chunk::DEFAULT_SIZE = 32; 
+const size_t Chunk::DEFAULT_SIZE = 128;
 const size_t Chunk::MAX_HEADER_SIZE = sizeof(MacHdr); 
+
 Chunk::Chunk(std::size_t max_bytes)
 :
 chunk_size(0),

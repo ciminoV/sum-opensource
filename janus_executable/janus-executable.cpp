@@ -47,6 +47,7 @@ bool half_duplex{true};
 bool mac_enabled{false}; /**< when true it adds mac info*/
 std::atomic<bool> exit_tx_rx{false}; /**< shared flag to terminate the threads */
 std::shared_ptr<ConcBuffer> rx_buffer = std::make_shared<ConcBuffer>(); /**< buffer containing decoded JANUS data */ 
+std::shared_ptr<ConcBuffer> tx_buffer = std::make_shared<ConcBuffer>(); /**< buffer containing packets received from the socket to be transmitted */
 /** 
   * Shared flag to check if the modem is transmitting. 
   * It has an effect only with half_duplex option enabled. 
@@ -61,28 +62,45 @@ GPIO gpio; /**< GPIO object handler */
 MacHdr my_hdr; /**< hdr with source and destination mac */
 
 /**
- * transmission loop, where data received from the user via socket
- * is modulated with JANUS and transmitted via soundcard
- * @param src_addr the source address of this node, just to discard the 
- * packet if it is received  back due to reflection or due to the loopback 
- * of the audio interface. 
+ * transmission loop, where data received from the user via TCP socket
+ * is pushed to a concurrent queue waiting to be transmitted.
  */
-void txLoop()
-{
+void tcpRxLoop() {
   while(!exit_tx_rx.load()) {
-    std::shared_ptr<Chunk> tx_chunk = std::make_shared<Chunk>(100);
+    std::shared_ptr<Chunk> tx_chunk = std::make_shared<Chunk>(Chunk::DEFAULT_SIZE);
     if(server.rx(tx_chunk)) {
-      gpio.txrxSwitch(true);
-      if(mac_enabled) {
-        tx_chunk->addHeader(&my_hdr,sizeof(my_hdr));
-      }
-      transmitting.store(true);
-      janus.modulate(tx_chunk);
-      astream->transmit(tx_chunk->getModulatedSamples()->samples);
-      gpio.txrxSwitch(false);//to check
-      transmitting.store(false);
+            tx_buffer->push(tx_chunk);
     } 
   }
+}
+
+/**
+ * transmission loop, where data in tx_buffer concurrent queue
+ * is modulated with JANUS and transmitted via soundcard.
+ */
+void
+txLoop()
+{
+    while (!exit_tx_rx.load()) {
+        std::shared_ptr<Chunk> tx_chunk = nullptr;
+
+        if (tx_buffer->wPop(tx_chunk)) {
+            if (exit_tx_rx.load())
+                break;
+
+            if (mac_enabled)
+                tx_chunk->addHeader(&my_hdr, sizeof(my_hdr));
+
+            gpio.txrxSwitch(true);
+            transmitting.store(true);
+
+            if (janus.modulate(tx_chunk))
+                astream->transmit(tx_chunk->getModulatedSamples()->samples);
+
+            gpio.txrxSwitch(false);
+            transmitting.store(false);
+        }
+    }
 }
 
 /**
@@ -269,7 +287,8 @@ int main(int argc, char* argv[])
   /**
    * Start the thread running the the transmission loop
    */
-  std::thread listen_thread(&txLoop); 
+  std::thread tcp_rx_thread(&tcpRxLoop);
+  std::thread tx_thread(&txLoop);
 
   /**
    * Start the thread running the the loop that reads the samples 
@@ -297,7 +316,9 @@ int main(int argc, char* argv[])
     }
   }
   server.quit();
-  listen_thread.join();
+  tx_buffer->forceExit();
+  tcp_rx_thread.join();
+  tx_thread.join();
   rx_samples_thread.join();
   exit(EXIT_SUCCESS);
 }
