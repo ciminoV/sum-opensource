@@ -40,6 +40,7 @@ JanusWrapper::JanusWrapper()
   cv_demod(),
   demod_data_available(0),
   mac_mode(0),
+  class_id(16),
   app_type(0)
 {
   params = janus_parameters_new();
@@ -113,15 +114,28 @@ JanusWrapper::initPacket(janus_packet_t packet)
   janus_packet_set_mobility(packet, 0);
   janus_packet_set_tx_rx(packet, 1);
   janus_packet_set_forward(packet, 0);
-  janus_packet_set_class_id(packet, 16);
+  janus_packet_set_class_id(packet, class_id);
   janus_packet_set_app_type(packet, app_type);
   janus_packet_set_validity(packet, 1); 
 }
 
 bool
+JanusWrapper::setJanusClassID(unsigned int id)
+{
+	// Supported class id: 16; 11
+    if (id != 16 && id != 11)
+        return false;
+
+    class_id = static_cast<janus_uint8_t>(id);
+    return true;
+}
+
+bool
 JanusWrapper::setJanusApplicationType(unsigned int type)
 {
-    if (type != 0 && type != 1)
+	// Supported plugins: 16_00; 16_01; 11_01; 11_02
+    if ((class_id == 16 && (type != 0 && type != 1)) || 
+		(class_id == 11 && (type != 1 && type != 2)))
         return false;
 
     app_type = static_cast<janus_uint8_t>(type);

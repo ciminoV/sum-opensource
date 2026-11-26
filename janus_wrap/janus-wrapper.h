@@ -75,6 +75,18 @@ public:
   */
   bool setRxBuffer(std::shared_ptr<ConcBuffer> buffer);
 
+  /**
+  * Function used to set the Janus class identifier.
+  *
+  * @return bool true if set is successful.
+  */
+  bool setJanusClassID(unsigned int type);
+
+  /**
+  * Function used to set the Janus application type.
+  *
+  * @return bool true if set is successful.
+  */
   bool setJanusApplicationType(unsigned int type);
 
   /**
@@ -194,7 +206,8 @@ private:
 
   int mac_mode; /**< MAC mode, 0 is disabled, 1 enabled */
 
-  janus_uint8_t app_type;
+  janus_uint8_t class_id; /**< Janus packets' class identifier */
+  janus_uint8_t app_type; /**< Janus packets' application type */
 };
 
 #endif

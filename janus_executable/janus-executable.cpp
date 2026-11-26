@@ -224,8 +224,9 @@ int main(int argc, char* argv[])
   my_hdr.src_addr = 1;
   my_hdr.dest_addr = 0;
   unsigned int verbose = 0;
+  unsigned int class_id = 16;
   unsigned int app_type = 0;
-  if(argc == 12) {
+  if(argc == 13) {
     sampling_frequency = atoi(argv[1]);
     center_frequency = atoi(argv[2]);
     bandwidth = atoi(argv[3]);
@@ -247,7 +248,8 @@ int main(int argc, char* argv[])
     my_hdr.src_addr = atoi(argv[8]);
     my_hdr.dest_addr = atoi(argv[9]);
     verbose = atoi(argv[10]);
-    app_type = atoi(argv[11]);
+    class_id = atoi(argv[11]);
+    app_type = atoi(argv[12]);
   }
   else if(argc != 1) {
     printHelp();
@@ -262,6 +264,7 @@ int main(int argc, char* argv[])
     <<" mac_enabled = " << mac_enabled
     <<" src_addr = " << (int)my_hdr.src_addr 
     << " dest_addr = " << (int)my_hdr.dest_addr
+    << " class_id = " << (int)class_id
     << " app_type = " << (int)app_type
     << std::endl;
   /**
@@ -273,6 +276,7 @@ int main(int argc, char* argv[])
   /**
    * Configure JANUS
    */
+  janus.setJanusClassID(class_id);
   janus.setJanusApplicationType(app_type);
   janus.setSamplingFrequency(sampling_frequency);
   janus.setCarrierFrequency(center_frequency);
