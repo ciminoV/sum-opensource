@@ -134,10 +134,12 @@ void printHelp() {
   std::cout << "source address (default: 1, range from 1 to 15), used only if MAC enabled" << std::endl;
   std::cout << "destination address (default: 0 (broadcast), range from 1 to 15), need MAC enabled" << std::endl;
   std::cout << "verbose (default: 0, range from 0 to 3)" << std::endl;
-  std::cout << "application type (default: 0, either 0 or 1 (crc-enabled))" << std::endl;
+  std::cout << "class identifier (default: 16, either 16 or 11)" << std::endl;
+  std::cout << "application type (default: 0)" << std::endl;
+  std::cout << "chat coding (default: 0), used only if class idientifier set to 11" << std::endl;
   std::cout << "----------------------------------------------------------------" << std::endl;  
   std::cout << "example:" << std::endl;
-  std::cout << "./janus_executable 96000 11520 4160 0.3 0 1 0 1 0 0 1" << std::endl;
+  std::cout << "./janus_executable 96000 11520 4160 0.3 0 1 0 1 0 0 16 0 0" << std::endl;
   std::cout << "----------------------------------------------------------------" << std::endl; 
   std::cout << "Here the Janus bands:" << std::endl;
   std::cout << " - A: centeral frequency = 11520 bandwidth = 4160" << std::endl;
@@ -226,7 +228,8 @@ int main(int argc, char* argv[])
   unsigned int verbose = 0;
   unsigned int class_id = 16;
   unsigned int app_type = 0;
-  if(argc == 13) {
+  unsigned int chat_coding = 0;
+  if(argc == 14) {
     sampling_frequency = atoi(argv[1]);
     center_frequency = atoi(argv[2]);
     bandwidth = atoi(argv[3]);
@@ -250,6 +253,7 @@ int main(int argc, char* argv[])
     verbose = atoi(argv[10]);
     class_id = atoi(argv[11]);
     app_type = atoi(argv[12]);
+	chat_coding = atoi(argv[13]);
   }
   else if(argc != 1) {
     printHelp();
@@ -266,6 +270,7 @@ int main(int argc, char* argv[])
     << " dest_addr = " << (int)my_hdr.dest_addr
     << " class_id = " << (int)class_id
     << " app_type = " << (int)app_type
+    << " chat_coding = " << (int)chat_coding
     << std::endl;
   /**
    * Open Alsa
@@ -278,6 +283,7 @@ int main(int argc, char* argv[])
    */
   janus.setJanusClassID(class_id);
   janus.setJanusApplicationType(app_type);
+  janus.setChatCoding(chat_coding);
   janus.setSamplingFrequency(sampling_frequency);
   janus.setCarrierFrequency(center_frequency);
   janus.setBandwidth(bandwidth);

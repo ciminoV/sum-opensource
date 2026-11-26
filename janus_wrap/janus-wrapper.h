@@ -76,18 +76,27 @@ public:
   bool setRxBuffer(std::shared_ptr<ConcBuffer> buffer);
 
   /**
-  * Function used to set the Janus class identifier.
+  * Method used to set the Janus class identifier.
   *
   * @return bool true if set is successful.
   */
   bool setJanusClassID(unsigned int type);
 
   /**
-  * Function used to set the Janus application type.
+  * Method used to set the Janus application type.
   *
   * @return bool true if set is successful.
   */
   bool setJanusApplicationType(unsigned int type);
+
+  /**
+  * Method used to set the Janus coding for Class ID 11
+  * Application type 1 : 0 = 8-bit ASCII, 1 = 7-bit ASCII;
+  * SMS (App type 1) also supports 2 = AIS and 3 = UTF-8.
+  *
+  * @return bool true if set is successful.
+  */
+  bool setChatCoding(unsigned coding);
 
   /**
   * Function used to set the carrier frequency
@@ -169,6 +178,12 @@ private:
   void initDefaultParams();
 
   /**
+  * Method that converts a decoded packet into a Chunk and queues it.
+  * Called by the performDemodulation() for every decoded packet.
+  */
+  void deliverPacket(janus_packet_t packet);
+
+  /**
   * function that performs the demodulation in a separated thread.
   */
   void performDemodulation();
@@ -201,13 +216,15 @@ private:
   float bandwidth; /**< Bandwidth in Hz */
 
   static const unsigned int JANUS_RED_SIZE; /**< constant equal to JANUS DEFAULT_DRV_IN_SIZE */
-  static const unsigned int MAX_SIZE_TO_READ; /**< max size to read from buffer */
-  static const unsigned int CRC_SIZE; 
+
 
   int mac_mode; /**< MAC mode, 0 is disabled, 1 enabled */
 
   janus_uint8_t class_id; /**< Janus packets' class identifier */
   janus_uint8_t app_type; /**< Janus packets' application type */
+  unsigned chat_coding; /**< Coding value for class_id 11 */
+  std::string fifo_arg; /**< TX FIFO size in bytes */
+  unsigned long tx_fifo_frames; /**< TX FIFO capacity */
 };
 
 #endif
